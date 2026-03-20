@@ -1,0 +1,19 @@
+HOW TO USE
+==========
+
+Recommended commands:
+- git-create-worktree
+- git-remove-worktree
+
+Install once:
+- ./install.sh
+
+Examples:
+- git-create-worktree feat/login-page
+- git-create-worktree -b feat/new-dashboard develop
+- git-remove-worktree feat/login-page
+
+Project files:
+- bin/: wrapper commands
+- lib/: core scripts
+- docs/: documentation

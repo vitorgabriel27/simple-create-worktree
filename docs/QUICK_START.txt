@@ -1,0 +1,17 @@
+WORKTREE SCRIPTS - QUICK START
+==============================
+
+1) Install:
+   ./install.sh
+
+2) Ensure PATH contains ~/.local/bin:
+   export PATH="$HOME/.local/bin:$PATH"
+
+3) Create worktree:
+   git-create-worktree feat/my-feature
+
+4) Create new branch + worktree:
+   git-create-worktree -b feat/new-feature develop
+
+5) Remove worktree:
+   git-remove-worktree feat/my-feature

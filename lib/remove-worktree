@@ -1,0 +1,173 @@
+#!/bin/bash
+
+# Git Worktree Removal Script
+# Removes a git worktree and deletes the associated local branch
+
+set -euo pipefail
+
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Get the repository root.
+# Use REPO_ROOT from wrapper when available; otherwise use current directory.
+if [[ -z "${REPO_ROOT:-}" ]]; then
+    REPO_ROOT="$(pwd)"
+fi
+
+# Function to print colored output
+print_status() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# Function to display usage
+usage() {
+    cat << EOF
+Usage: git-remove-worktree <branch-name-or-path>
+
+Remove a git worktree and delete the associated local branch.
+
+Arguments:
+  <branch-name-or-path>  Branch name (e.g., feat/my-feature) or worktree path
+
+Examples:
+  git-remove-worktree feat/my-feature
+  git-remove-worktree chore/refactor
+  git-remove-worktree /full/path/to/worktree
+
+EOF
+    exit 1
+}
+
+# Validate inputs
+if [[ $# -ne 1 ]]; then
+    print_error "Incorrect number of arguments"
+    usage
+fi
+
+INPUT="$1"
+
+# Check for help flag
+if [[ "$INPUT" == "-h" ]] || [[ "$INPUT" == "--help" ]]; then
+    usage
+fi
+
+# Validate we're in a bare repository
+print_status "Validating repository..."
+if ! git -C "$REPO_ROOT" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
+    print_error "Not a bare repository at $REPO_ROOT"
+    exit 1
+fi
+
+# Determine if input is a path or a branch name
+if [[ -d "$INPUT" ]]; then
+    # Input is a path
+    WORKTREE_PATH="$INPUT"
+else
+    # Input is a branch name - construct the path
+    if [[ "$INPUT" == *"/"* ]]; then
+        PREFIX="${INPUT%%/*}"
+        WORKTREE_NAME="${INPUT#*/}"
+        WORKTREE_PATH="$REPO_ROOT/$PREFIX/$WORKTREE_NAME"
+    else
+        WORKTREE_PATH="$REPO_ROOT/$INPUT"
+    fi
+fi
+
+# Normalize the path
+WORKTREE_PATH="$(cd "$WORKTREE_PATH" 2>/dev/null && pwd || echo "$WORKTREE_PATH")"
+
+# Verify the worktree exists
+print_status "Checking if worktree exists: $WORKTREE_PATH"
+if ! git -C "$REPO_ROOT" worktree list | grep -q "^$WORKTREE_PATH"; then
+    print_error "Worktree not found: $WORKTREE_PATH"
+    print_status "Available worktrees:"
+    git -C "$REPO_ROOT" worktree list | grep -v "^$REPO_ROOT " | sed 's/^/  /'
+    exit 1
+fi
+print_success "Worktree found"
+
+# Extract the branch name from the worktree (the part after the last slash or the directory name)
+if [[ "$WORKTREE_PATH" == "$REPO_ROOT" ]]; then
+    print_error "Cannot remove the main bare repository worktree"
+    exit 1
+fi
+
+BRANCH_NAME=$(basename "$WORKTREE_PATH")
+if [[ "$WORKTREE_PATH" != "$REPO_ROOT/$BRANCH_NAME" ]]; then
+    # The worktree is in a subdirectory, get the full relative path
+    RELATIVE_PATH="${WORKTREE_PATH#$REPO_ROOT/}"
+    BRANCH_NAME="$RELATIVE_PATH"
+fi
+
+print_status "Branch name: $BRANCH_NAME"
+
+# Get worktree details
+WORKTREE_INFO=$(git -C "$REPO_ROOT" worktree list --porcelain | grep "^worktree $WORKTREE_PATH" | head -1)
+if [[ -z "$WORKTREE_INFO" ]]; then
+    print_error "Could not retrieve worktree details"
+    exit 1
+fi
+
+print_status "Worktree details:"
+git -C "$REPO_ROOT" worktree list | grep "^$WORKTREE_PATH" | sed 's/^/  /'
+
+# Confirm removal
+echo
+print_warning "⚠️  This will remove the worktree and delete the local branch"
+read -p "Are you sure you want to remove '$BRANCH_NAME'? (yes/no) " -r
+echo
+if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+    print_status "Removal cancelled"
+    exit 0
+fi
+
+# Remove the worktree
+print_status "Removing worktree..."
+if git -C "$REPO_ROOT" worktree remove "$WORKTREE_PATH" --force; then
+    print_success "Worktree removed"
+else
+    print_error "Failed to remove worktree"
+    exit 1
+fi
+
+# Try to remove the local branch
+print_status "Checking for local branch '$BRANCH_NAME'..."
+if git -C "$REPO_ROOT" rev-parse --verify "$BRANCH_NAME" > /dev/null 2>&1; then
+    print_status "Removing local branch '$BRANCH_NAME'..."
+    
+    # Try to delete the branch (use -D for force if -d fails)
+    if git -C "$REPO_ROOT" branch -d "$BRANCH_NAME" 2>/dev/null; then
+        print_success "Local branch '$BRANCH_NAME' deleted"
+    else
+        print_warning "Could not delete branch with -d, trying with -D (force)..."
+        if git -C "$REPO_ROOT" branch -D "$BRANCH_NAME"; then
+            print_success "Local branch '$BRANCH_NAME' deleted (forced)"
+        else
+            print_error "Failed to delete branch '$BRANCH_NAME'"
+            exit 1
+        fi
+    fi
+else
+    print_warning "Local branch '$BRANCH_NAME' does not exist or already deleted"
+fi
+
+# Summary
+print_success "Removal completed!"
+print_status "Current worktrees:"
+git -C "$REPO_ROOT" worktree list | sed 's/^/  /'

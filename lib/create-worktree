@@ -1,0 +1,292 @@
+#!/bin/bash
+
+# Git Worktree Creation Script
+# Creates a git worktree from a branch in a bare repository
+# Automatically organizes worktrees by branch prefix (feat/, chore/, develop/, etc.)
+
+set -euo pipefail
+
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Get the repository root.
+# Use REPO_ROOT from wrapper when available; otherwise use current directory.
+if [[ -z "${REPO_ROOT:-}" ]]; then
+    REPO_ROOT="$(pwd)"
+fi
+
+# Function to print colored output
+print_status() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# Resolve a branch name to a usable ref.
+# Preference:
+#   1. origin/<branch>
+#   2. <branch>
+resolve_branch_ref() {
+    local branch_name="$1"
+
+    if git -C "$REPO_ROOT" rev-parse --verify "origin/$branch_name" > /dev/null 2>&1; then
+        echo "origin/$branch_name"
+        return 0
+    fi
+
+    if git -C "$REPO_ROOT" rev-parse --verify "$branch_name" > /dev/null 2>&1; then
+        echo "$branch_name"
+        return 0
+    fi
+
+    return 1
+}
+
+# Function to display usage
+usage() {
+    cat << EOF
+Usage: git-create-worktree [OPTIONS] <branch-name>
+       git-create-worktree -b <new-branch> <base-branch>
+
+Create a git worktree from a branch in the bare repository.
+Worktrees are automatically organized by branch prefix (feat/, chore/, develop/, etc.).
+
+Arguments:
+  <branch-name>      Existing branch name (e.g., feat/smp-web, chore/refactor, develop)
+
+Options:
+  -b <new-branch> <base-branch>
+                     Create a new local branch from base-branch and create worktree
+                     <new-branch>   Name of the new branch to create
+                     <base-branch>  Existing branch to base it on
+
+Examples:
+  git-create-worktree feat/new-feature
+  git-create-worktree chore/dependencies
+  git-create-worktree develop
+  git-create-worktree -b feat/my-new-feature develop
+  git-create-worktree -b feat/my-new-feature feat/smp-web
+
+EOF
+    exit 1
+}
+
+# Parse arguments
+CREATE_NEW_BRANCH=false
+NEW_BRANCH_NAME=""
+BASE_BRANCH_NAME=""
+BRANCH_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -b)
+            if [[ $# -lt 3 ]]; then
+                print_error "Option -b requires two arguments: <new-branch> <base-branch>"
+                usage
+            fi
+            CREATE_NEW_BRANCH=true
+            NEW_BRANCH_NAME="$2"
+            BASE_BRANCH_NAME="$3"
+            BRANCH_NAME="$NEW_BRANCH_NAME"
+            shift 3
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            if [[ -n "$BRANCH_NAME" ]]; then
+                print_error "Unexpected argument: $1"
+                usage
+            fi
+            BRANCH_NAME="$1"
+            shift
+            ;;
+    esac
+done
+
+# Validate inputs
+if [[ -z "$BRANCH_NAME" ]]; then
+    print_error "Missing branch name"
+    usage
+fi
+
+# Validate we're in a bare repository
+print_status "Validating repository..."
+if ! git -C "$REPO_ROOT" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
+    print_error "Not a bare repository at $REPO_ROOT"
+    exit 1
+fi
+
+# Get the remote URL
+REMOTE_URL=$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)
+if [[ -z "$REMOTE_URL" ]]; then
+    print_error "No remote 'origin' configured in the repository"
+    exit 1
+fi
+print_status "Remote origin: $REMOTE_URL"
+
+# Fetch latest from remote
+print_status "Fetching latest from remote origin..."
+if git -C "$REPO_ROOT" fetch origin 2>&1 | tail -1; then
+    print_success "Fetch completed"
+else
+    print_error "Failed to fetch from remote"
+    exit 1
+fi
+
+SOURCE_REF=""
+BASE_REF=""
+
+# If creating a new branch, handle that first
+if [[ "$CREATE_NEW_BRANCH" == true ]]; then
+    print_status "Creating new branch '$NEW_BRANCH_NAME' from '$BASE_BRANCH_NAME'..."
+
+    print_status "Resolving base branch '$BASE_BRANCH_NAME'..."
+    if ! BASE_REF="$(resolve_branch_ref "$BASE_BRANCH_NAME")"; then
+        print_error "Base branch '$BASE_BRANCH_NAME' was not found as either 'origin/$BASE_BRANCH_NAME' or '$BASE_BRANCH_NAME'"
+        print_status "Local branches:"
+        git -C "$REPO_ROOT" branch | sed 's/^/  /'
+        print_status "Remote branches:"
+        git -C "$REPO_ROOT" branch -r | sed 's/^/  /'
+        exit 1
+    fi
+    print_success "Base branch resolved to '$BASE_REF'"
+
+    # Check if the new branch already exists
+    if git -C "$REPO_ROOT" rev-parse --verify "$NEW_BRANCH_NAME" > /dev/null 2>&1; then
+        print_error "Branch '$NEW_BRANCH_NAME' already exists locally"
+        exit 1
+    fi
+
+    # Create the new branch locally from the resolved base ref
+    print_status "Creating local branch '$NEW_BRANCH_NAME' from '$BASE_REF'..."
+    if git -C "$REPO_ROOT" branch "$NEW_BRANCH_NAME" "$BASE_REF"; then
+        print_success "Branch '$NEW_BRANCH_NAME' created successfully"
+
+        # Unset upstream tracking only if there is one
+        if git -C "$REPO_ROOT" rev-parse --abbrev-ref "$NEW_BRANCH_NAME@{upstream}" > /dev/null 2>&1; then
+            print_status "Removing upstream tracking (user can publish when ready)..."
+            git -C "$REPO_ROOT" branch --unset-upstream "$NEW_BRANCH_NAME"
+            print_success "Upstream tracking removed - ready for local work"
+        else
+            print_status "No upstream tracking set for '$NEW_BRANCH_NAME' (already ready for local work)"
+        fi
+    else
+        print_error "Failed to create branch '$NEW_BRANCH_NAME'"
+        exit 1
+    fi
+else
+    # Resolve the source branch for existing branch checkout
+    print_status "Resolving branch '$BRANCH_NAME'..."
+    if ! SOURCE_REF="$(resolve_branch_ref "$BRANCH_NAME")"; then
+        print_error "Branch '$BRANCH_NAME' was not found as either 'origin/$BRANCH_NAME' or '$BRANCH_NAME'"
+        print_status "Local branches:"
+        git -C "$REPO_ROOT" branch | sed 's/^/  /'
+        print_status "Remote branches:"
+        git -C "$REPO_ROOT" branch -r | sed 's/^/  /'
+        exit 1
+    fi
+    print_success "Branch resolved to '$SOURCE_REF'"
+fi
+
+# Determine target directory based on branch prefix
+# Extract prefix (everything before the first slash, or use branch name as-is)
+if [[ "$BRANCH_NAME" == *"/"* ]]; then
+    PREFIX="${BRANCH_NAME%%/*}"
+    WORKTREE_NAME="${BRANCH_NAME#*/}"
+    TARGET_DIR="$REPO_ROOT/$PREFIX/$WORKTREE_NAME"
+else
+    # For branches without prefix (e.g., develop, main)
+    PREFIX="$BRANCH_NAME"
+    WORKTREE_NAME="$BRANCH_NAME"
+    TARGET_DIR="$REPO_ROOT/$BRANCH_NAME"
+fi
+
+print_status "Worktree target: $TARGET_DIR"
+
+# Check if worktree already exists
+if [[ -d "$TARGET_DIR" ]]; then
+    print_warning "Worktree already exists at $TARGET_DIR"
+
+    # Check if it's a valid worktree
+    if git -C "$REPO_ROOT" worktree list | grep -q "^$TARGET_DIR"; then
+        read -p "Do you want to remove and recreate it? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_status "Removing existing worktree..."
+            git -C "$REPO_ROOT" worktree remove "$TARGET_DIR" --force
+            print_success "Existing worktree removed"
+        else
+            print_status "Skipping worktree creation"
+            exit 0
+        fi
+    else
+        print_error "Directory exists but is not a valid worktree: $TARGET_DIR"
+        exit 1
+    fi
+fi
+
+# Create parent directory if needed
+PARENT_DIR="$(dirname "$TARGET_DIR")"
+if [[ ! -d "$PARENT_DIR" ]]; then
+    print_status "Creating parent directory: $PARENT_DIR"
+    mkdir -p "$PARENT_DIR"
+fi
+
+# Check if the branch already exists locally
+BRANCH_EXISTS=$(git -C "$REPO_ROOT" rev-parse --verify "$BRANCH_NAME" 2>/dev/null || echo "")
+
+# Create the worktree
+print_status "Creating worktree for branch '$BRANCH_NAME' at '$TARGET_DIR'..."
+if [[ -n "$BRANCH_EXISTS" ]]; then
+    # Branch exists locally, use it directly
+    if git -C "$REPO_ROOT" worktree add "$TARGET_DIR" "$BRANCH_NAME"; then
+        print_success "Worktree created successfully!"
+    else
+        print_error "Failed to create worktree"
+        exit 1
+    fi
+else
+    # Branch doesn't exist locally, create it from the resolved source ref
+    if [[ -z "$SOURCE_REF" ]]; then
+        print_error "Internal error: SOURCE_REF is empty"
+        exit 1
+    fi
+
+    if git -C "$REPO_ROOT" worktree add -b "$BRANCH_NAME" "$TARGET_DIR" "$SOURCE_REF"; then
+        print_success "Worktree created successfully!"
+    else
+        print_error "Failed to create worktree"
+        exit 1
+    fi
+fi
+
+print_status "Location: $TARGET_DIR"
+print_status "Branch: $BRANCH_NAME"
+
+# If this was a newly created branch, show push instructions
+if [[ "$CREATE_NEW_BRANCH" == true ]]; then
+    echo ""
+    print_status "Publishing your new branch:"
+    echo "  cd $TARGET_DIR"
+    echo "  git push -u origin $BRANCH_NAME"
+    echo ""
+fi
+
+# List all current worktrees
+print_status "Current worktrees:"
+git -C "$REPO_ROOT" worktree list | sed 's/^/  /'
