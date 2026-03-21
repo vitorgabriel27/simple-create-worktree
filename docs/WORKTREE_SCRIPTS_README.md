@@ -1,6 +1,6 @@
 # Git Worktree Scripts
 
-Utility scripts to create and remove Git worktrees from a bare repository.
+Utility scripts to create and remove Git worktrees from a valid Git repository.
 
 ## Layout
 
@@ -32,7 +32,7 @@ git-remove-worktree feat/my-feature
 
 ## Advanced usage
 
-Run core scripts from your bare repo directory:
+Run core scripts from your repository directory:
 
 ```bash
 /path/to/this-repo/lib/create-worktree feat/my-feature

@@ -54,7 +54,15 @@ git-create-worktree -b feat/new-feature develop
 git-remove-worktree feat/my-feature
 ```
 
+## Tests
+
+Run the main use-case test suite:
+
+```bash
+./tests/test-main-use-cases.sh
+```
+
 ## Notes
 
-- Wrapper commands auto-detect your bare repository context.
-- Core commands (`./create-worktree`, `./remove-worktree`) are intended to run from the bare repo directory.
+- Wrapper commands auto-detect your Git repository context.
+- Core commands (`./create-worktree`, `./remove-worktree`) are intended to run from a valid Git repository directory.
