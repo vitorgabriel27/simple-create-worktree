@@ -36,15 +36,49 @@ print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+# Detect the default remote to use for fetch/ref resolution.
+# Preference:
+#   1. branch.<current>.remote
+#   2. origin
+#   3. first configured remote
+detect_default_remote() {
+    local current_branch
+    local branch_remote
+    local first_remote
+
+    current_branch="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
+    if [[ -n "$current_branch" ]]; then
+        branch_remote="$(git -C "$REPO_ROOT" config --get "branch.$current_branch.remote" 2>/dev/null || true)"
+        if [[ -n "$branch_remote" ]]; then
+            echo "$branch_remote"
+            return 0
+        fi
+    fi
+
+    if git -C "$REPO_ROOT" remote | grep -qx "origin"; then
+        echo "origin"
+        return 0
+    fi
+
+    first_remote="$(git -C "$REPO_ROOT" remote | head -1)"
+    if [[ -n "$first_remote" ]]; then
+        echo "$first_remote"
+        return 0
+    fi
+
+    return 1
+}
+
 # Resolve a branch name to a usable ref.
 # Preference:
-#   1. origin/<branch>
+#   1. <default-remote>/<branch>
 #   2. <branch>
 resolve_branch_ref() {
     local branch_name="$1"
+    local remote_name="$2"
 
-    if git -C "$REPO_ROOT" rev-parse --verify "origin/$branch_name" > /dev/null 2>&1; then
-        echo "origin/$branch_name"
+    if git -C "$REPO_ROOT" rev-parse --verify "$remote_name/$branch_name" > /dev/null 2>&1; then
+        echo "$remote_name/$branch_name"
         return 0
     fi
 
@@ -131,20 +165,27 @@ if ! git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
     exit 1
 fi
 
-# Get the remote URL
-REMOTE_URL=$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)
-if [[ -z "$REMOTE_URL" ]]; then
-    print_error "No remote 'origin' configured in the repository"
+# Detect default remote
+DEFAULT_REMOTE="$(detect_default_remote || true)"
+if [[ -z "$DEFAULT_REMOTE" ]]; then
+    print_error "No git remote configured in the repository"
     exit 1
 fi
-print_status "Remote origin: $REMOTE_URL"
+
+# Get the remote URL
+REMOTE_URL=$(git -C "$REPO_ROOT" config --get "remote.$DEFAULT_REMOTE.url" 2>/dev/null || true)
+if [[ -z "$REMOTE_URL" ]]; then
+    print_error "Remote '$DEFAULT_REMOTE' has no URL configured"
+    exit 1
+fi
+print_status "Remote $DEFAULT_REMOTE: $REMOTE_URL"
 
 # Fetch latest from remote
-print_status "Fetching latest from remote origin..."
-if git -C "$REPO_ROOT" fetch origin 2>&1 | tail -1; then
+print_status "Fetching latest from remote $DEFAULT_REMOTE..."
+if git -C "$REPO_ROOT" fetch "$DEFAULT_REMOTE" 2>&1 | tail -1; then
     print_success "Fetch completed"
 else
-    print_error "Failed to fetch from remote"
+    print_error "Failed to fetch from remote '$DEFAULT_REMOTE'"
     exit 1
 fi
 
@@ -156,8 +197,8 @@ if [[ "$CREATE_NEW_BRANCH" == true ]]; then
     print_status "Creating new branch '$NEW_BRANCH_NAME' from '$BASE_BRANCH_NAME'..."
 
     print_status "Resolving base branch '$BASE_BRANCH_NAME'..."
-    if ! BASE_REF="$(resolve_branch_ref "$BASE_BRANCH_NAME")"; then
-        print_error "Base branch '$BASE_BRANCH_NAME' was not found as either 'origin/$BASE_BRANCH_NAME' or '$BASE_BRANCH_NAME'"
+    if ! BASE_REF="$(resolve_branch_ref "$BASE_BRANCH_NAME" "$DEFAULT_REMOTE")"; then
+        print_error "Base branch '$BASE_BRANCH_NAME' was not found as either '$DEFAULT_REMOTE/$BASE_BRANCH_NAME' or '$BASE_BRANCH_NAME'"
         print_status "Local branches:"
         git -C "$REPO_ROOT" branch | sed 's/^/  /'
         print_status "Remote branches:"
@@ -192,8 +233,8 @@ if [[ "$CREATE_NEW_BRANCH" == true ]]; then
 else
     # Resolve the source branch for existing branch checkout
     print_status "Resolving branch '$BRANCH_NAME'..."
-    if ! SOURCE_REF="$(resolve_branch_ref "$BRANCH_NAME")"; then
-        print_error "Branch '$BRANCH_NAME' was not found as either 'origin/$BRANCH_NAME' or '$BRANCH_NAME'"
+    if ! SOURCE_REF="$(resolve_branch_ref "$BRANCH_NAME" "$DEFAULT_REMOTE")"; then
+        print_error "Branch '$BRANCH_NAME' was not found as either '$DEFAULT_REMOTE/$BRANCH_NAME' or '$BRANCH_NAME'"
         print_status "Local branches:"
         git -C "$REPO_ROOT" branch | sed 's/^/  /'
         print_status "Remote branches:"
@@ -283,7 +324,7 @@ if [[ "$CREATE_NEW_BRANCH" == true ]]; then
     echo ""
     print_status "Publishing your new branch:"
     echo "  cd $TARGET_DIR"
-    echo "  git push -u origin $BRANCH_NAME"
+    echo "  git push -u $DEFAULT_REMOTE $BRANCH_NAME"
     echo ""
 fi
 
