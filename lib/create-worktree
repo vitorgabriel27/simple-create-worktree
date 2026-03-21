@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Git Worktree Creation Script
-# Creates a git worktree from a branch in a bare repository
+# Creates a git worktree from a branch in a Git repository
 # Automatically organizes worktrees by branch prefix (feat/, chore/, develop/, etc.)
 
 set -euo pipefail
@@ -62,7 +62,7 @@ usage() {
 Usage: git-create-worktree [OPTIONS] <branch-name>
        git-create-worktree -b <new-branch> <base-branch>
 
-Create a git worktree from a branch in the bare repository.
+Create a git worktree from a branch in the repository.
 Worktrees are automatically organized by branch prefix (feat/, chore/, develop/, etc.).
 
 Arguments:
@@ -124,10 +124,10 @@ if [[ -z "$BRANCH_NAME" ]]; then
     usage
 fi
 
-# Validate we're in a bare repository
+# Validate we're in a git repository
 print_status "Validating repository..."
-if ! git -C "$REPO_ROOT" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
-    print_error "Not a bare repository at $REPO_ROOT"
+if ! git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+    print_error "Not a valid git repository at $REPO_ROOT"
     exit 1
 fi
 

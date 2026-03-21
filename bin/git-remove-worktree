@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Global Git Worktree Removal Script
-# Auto-detects bare repository by searching up the directory tree.
+# Auto-detects a Git repository by searching up the directory tree.
 
 set -euo pipefail
 
@@ -43,18 +43,26 @@ resolve_script_dir() {
     cd -P "$(dirname "$source")" && pwd
 }
 
-# Function to find the bare repository by searching up
-find_bare_repo() {
+# Function to find a git repository by searching up
+find_git_repo() {
     local current_dir="$(pwd)"
 
     while [[ "$current_dir" != "/" ]]; do
-        # Candidate 1: the current directory is itself a bare repository.
+        # Candidate 1: current directory is a git repository root.
+        local toplevel
+        toplevel="$(git -C "$current_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+        if [[ -n "$toplevel" ]]; then
+            echo "$toplevel"
+            return 0
+        fi
+
+        # Candidate 2: current directory is a bare repository.
         if git -C "$current_dir" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
             echo "$current_dir"
             return 0
         fi
 
-        # Candidate 2: we're inside a worktree attached to a bare repository.
+        # Candidate 3: we're inside a worktree attached to a bare repository.
         local common_dir
         common_dir="$(git -C "$current_dir" rev-parse --git-common-dir 2>/dev/null || true)"
         if [[ -n "$common_dir" ]]; then
@@ -66,6 +74,9 @@ find_bare_repo() {
             if [[ -n "$common_dir" ]]; then
                 local candidate
                 candidate="$(dirname "$common_dir")"
+                if [[ "$(basename "$common_dir")" == ".git" ]]; then
+                    candidate="$(dirname "$common_dir")"
+                fi
                 if git -C "$candidate" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
                     echo "$candidate"
                     return 0
@@ -76,9 +87,9 @@ find_bare_repo() {
         current_dir="$(dirname "$current_dir")"
     done
 
-    print_error "No bare git repository found in parent directories"
+    print_error "No git repository found in parent directories"
     print_status "Current working directory: $(pwd)"
-    print_status "Please run this command from within a bare git repository"
+    print_status "Please run this command from within a git repository"
     return 1
 }
 
@@ -104,13 +115,13 @@ if [[ "$BRANCH_OR_PATH" == "-h" ]] || [[ "$BRANCH_OR_PATH" == "--help" ]]; then
     exec "$CORE_SCRIPT" "$BRANCH_OR_PATH"
 fi
 
-# Find the bare repository
-print_status "Searching for bare git repository..."
-REPO_ROOT=$(find_bare_repo) || exit 1
+# Find the repository
+print_status "Searching for git repository..."
+REPO_ROOT=$(find_git_repo) || exit 1
 
-print_status "Found bare repository at: $REPO_ROOT"
+print_status "Found repository at: $REPO_ROOT"
 
-# Run the core remove-worktree script with the bare repo as working directory
+# Run the core remove-worktree script with the repo as working directory
 print_status "Running remove-worktree..."
 cd "$REPO_ROOT"
 # Set REPO_ROOT environment variable for the script

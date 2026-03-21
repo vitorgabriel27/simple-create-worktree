@@ -67,10 +67,10 @@ if [[ "$INPUT" == "-h" ]] || [[ "$INPUT" == "--help" ]]; then
     usage
 fi
 
-# Validate we're in a bare repository
+# Validate we're in a git repository
 print_status "Validating repository..."
-if ! git -C "$REPO_ROOT" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
-    print_error "Not a bare repository at $REPO_ROOT"
+if ! git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+    print_error "Not a valid git repository at $REPO_ROOT"
     exit 1
 fi
 
@@ -104,7 +104,7 @@ print_success "Worktree found"
 
 # Extract the branch name from the worktree (the part after the last slash or the directory name)
 if [[ "$WORKTREE_PATH" == "$REPO_ROOT" ]]; then
-    print_error "Cannot remove the main bare repository worktree"
+    print_error "Cannot remove the main repository worktree"
     exit 1
 fi
 
