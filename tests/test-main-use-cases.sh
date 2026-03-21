@@ -97,6 +97,28 @@ setup_repo() {
     git -C "$repo" branch feat/existing main
 }
 
+setup_repo_with_non_origin_remote() {
+    local test_dir="$1"
+    local upstream_remote="$test_dir/upstream.git"
+    local seed_repo="$test_dir/seed-upstream"
+    local repo="$test_dir/repo-non-origin"
+
+    git init --bare -q "$upstream_remote"
+    git clone -q "$upstream_remote" "$seed_repo" >/dev/null 2>&1
+    git -C "$seed_repo" config user.name "test-user"
+    git -C "$seed_repo" config user.email "test-user@example.com"
+    git -C "$seed_repo" checkout -q -b develop
+    git -C "$seed_repo" commit --allow-empty -m "seed" -q
+    git -C "$seed_repo" push -q -u origin develop
+
+    git init -q "$repo"
+    git -C "$repo" config user.name "test-user"
+    git -C "$repo" config user.email "test-user@example.com"
+    git -C "$repo" remote add upstream "$upstream_remote"
+    git -C "$repo" fetch -q upstream
+    git -C "$repo" checkout -q -b develop upstream/develop
+}
+
 run_non_git_failure_test() {
     local non_repo="$1/non-repo"
     mkdir -p "$non_repo"
@@ -158,6 +180,47 @@ run_remove_by_path_test() {
     pass "remove by worktree path"
 }
 
+run_create_existing_branch_with_non_origin_remote_test() {
+    local repo="$1"
+    local nested="$repo/nested/non-origin"
+    local worktree="$repo/chore/upstream-branch"
+
+    git -C "$repo" branch chore/upstream-branch upstream/develop
+    mkdir -p "$nested"
+    (cd "$nested" && "$CREATE_CMD" chore/upstream-branch >/dev/null)
+
+    assert_file_exists "non-origin existing branch worktree directory created" "$worktree"
+    assert_worktree_registered "non-origin existing branch worktree registered" "$repo" "$worktree"
+    pass "create existing branch with non-origin remote"
+}
+
+run_create_new_branch_with_non_origin_remote_test() {
+    local repo="$1"
+    local nested="$repo/nested/non-origin-new"
+    local worktree="$repo/feat/from-upstream"
+
+    mkdir -p "$nested"
+    (cd "$nested" && "$CREATE_CMD" -b feat/from-upstream develop >/dev/null)
+
+    assert_file_exists "non-origin new branch worktree directory created" "$worktree"
+    assert_worktree_registered "non-origin new branch worktree registered" "$repo" "$worktree"
+    assert_branch_exists "non-origin new branch created" "$repo" "feat/from-upstream"
+    pass "create new branch from non-origin remote base"
+}
+
+run_remove_non_origin_worktrees_test() {
+    local repo="$1"
+
+    (cd "$repo" && printf "yes\n" | "$REMOVE_CMD" chore/upstream-branch >/dev/null)
+    (cd "$repo" && printf "yes\n" | "$REMOVE_CMD" feat/from-upstream >/dev/null)
+
+    assert_file_not_exists "non-origin existing worktree removed" "$repo/chore/upstream-branch"
+    assert_file_not_exists "non-origin new worktree removed" "$repo/feat/from-upstream"
+    assert_branch_not_exists "non-origin existing branch deleted" "$repo" "chore/upstream-branch"
+    assert_branch_not_exists "non-origin new branch deleted" "$repo" "feat/from-upstream"
+    pass "remove non-origin worktrees"
+}
+
 main() {
     [[ -x "$CREATE_CMD" ]] || fail "create command executable" "$CREATE_CMD is not executable"
     [[ -x "$REMOVE_CMD" ]] || fail "remove command executable" "$REMOVE_CMD is not executable"
@@ -175,6 +238,12 @@ main() {
     run_remove_by_branch_test "$repo"
     run_create_new_branch_test "$repo"
     run_remove_by_path_test "$repo"
+
+    setup_repo_with_non_origin_remote "$TEST_TMP_DIR"
+    local non_origin_repo="$TEST_TMP_DIR/repo-non-origin"
+    run_create_existing_branch_with_non_origin_remote_test "$non_origin_repo"
+    run_create_new_branch_with_non_origin_remote_test "$non_origin_repo"
+    run_remove_non_origin_worktrees_test "$non_origin_repo"
 
     echo ""
     echo "All main use-case tests passed ($TEST_COUNT checks)."
