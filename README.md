@@ -1,6 +1,6 @@
 # Git Worktree Helper Scripts
 
-Small Bash toolkit to create and remove Git worktrees with a consistent folder layout.
+Small Bash toolkit to create, remove, and update Git worktrees with a consistent folder layout.
 
 ## Repository structure
 
@@ -8,10 +8,12 @@ Small Bash toolkit to create and remove Git worktrees with a consistent folder l
 .
 ├── bin/
 │   ├── git-create-worktree
-│   └── git-remove-worktree
+│   ├── git-remove-worktree
+│   └── git-update-worktree
 ├── lib/
 │   ├── create-worktree
-│   └── remove-worktree
+│   ├── remove-worktree
+│   └── update-worktree
 ├── docs/
 │   ├── QUICK_START.txt
 │   ├── HOW_TO_USE.txt
@@ -20,6 +22,8 @@ Small Bash toolkit to create and remove Git worktrees with a consistent folder l
 ├── remove-worktree
 ├── git-create-worktree
 ├── git-remove-worktree
+├── update-worktree
+├── git-update-worktree
 └── install.sh
 ```
 
@@ -39,6 +43,7 @@ This creates symlinks in `~/.local/bin`:
 
 - `git-create-worktree`
 - `git-remove-worktree`
+- `git-update-worktree`
 
 If `~/.local/bin` is not in your `PATH`, add:
 
@@ -52,6 +57,8 @@ export PATH="$HOME/.local/bin:$PATH"
 git-create-worktree feat/my-feature
 git-create-worktree -b feat/new-feature develop
 git-remove-worktree feat/my-feature
+git-update-worktree
+git-update-worktree develop
 ```
 
 ## Tests
@@ -65,4 +72,4 @@ Run the main use-case test suite:
 ## Notes
 
 - Wrapper commands auto-detect your Git repository context.
-- Core commands (`./create-worktree`, `./remove-worktree`) are intended to run from a valid Git repository directory.
+- Core commands (`./create-worktree`, `./remove-worktree`, `./update-worktree`) are intended to run from a valid Git repository directory.

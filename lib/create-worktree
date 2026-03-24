@@ -259,12 +259,18 @@ fi
 
 print_status "Worktree target: $TARGET_DIR"
 
+# Check if target is already registered as a worktree path
+TARGET_REGISTERED=false
+if git -C "$REPO_ROOT" worktree list --porcelain | grep -Fxq "worktree $TARGET_DIR"; then
+    TARGET_REGISTERED=true
+fi
+
 # Check if worktree already exists
 if [[ -d "$TARGET_DIR" ]]; then
     print_warning "Worktree already exists at $TARGET_DIR"
 
     # Check if it's a valid worktree
-    if git -C "$REPO_ROOT" worktree list | grep -q "^$TARGET_DIR"; then
+    if [[ "$TARGET_REGISTERED" == true ]]; then
         read -p "Do you want to remove and recreate it? (y/n) " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -279,6 +285,18 @@ if [[ -d "$TARGET_DIR" ]]; then
         print_error "Directory exists but is not a valid worktree: $TARGET_DIR"
         exit 1
     fi
+elif [[ "$TARGET_REGISTERED" == true ]]; then
+    print_warning "Found stale worktree registration for missing path: $TARGET_DIR"
+    print_status "Pruning stale worktree registrations..."
+    git -C "$REPO_ROOT" worktree prune --expire now
+
+    if git -C "$REPO_ROOT" worktree list --porcelain | grep -Fxq "worktree $TARGET_DIR"; then
+        print_error "Failed to clear stale worktree registration: $TARGET_DIR"
+        print_status "Try manually: git -C '$REPO_ROOT' worktree remove '$TARGET_DIR' --force"
+        exit 1
+    fi
+
+    print_success "Stale worktree registration cleared"
 fi
 
 # Create parent directory if needed
