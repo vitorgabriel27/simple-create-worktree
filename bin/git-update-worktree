@@ -1,0 +1,126 @@
+#!/bin/bash
+
+# Global Git Worktree Update Script
+# Auto-detects a Git repository by searching up the directory tree.
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+print_status() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+usage() {
+    cat << EOF
+Usage: $(basename "$0") [branch-name]
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") develop
+  $(basename "$0") feat/my-feature
+EOF
+    exit 1
+}
+
+resolve_script_dir() {
+    local source="${BASH_SOURCE[0]}"
+    while [[ -L "$source" ]]; do
+        local dir
+        dir="$(cd -P "$(dirname "$source")" && pwd)"
+        source="$(readlink "$source")"
+        [[ "$source" != /* ]] && source="$dir/$source"
+    done
+    cd -P "$(dirname "$source")" && pwd
+}
+
+find_git_repo() {
+    local current_dir
+    current_dir="$(pwd)"
+
+    while [[ "$current_dir" != "/" ]]; do
+        local toplevel
+        toplevel="$(git -C "$current_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+        if [[ -n "$toplevel" ]]; then
+            echo "$toplevel"
+            return 0
+        fi
+
+        if git -C "$current_dir" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
+            echo "$current_dir"
+            return 0
+        fi
+
+        local common_dir
+        common_dir="$(git -C "$current_dir" rev-parse --git-common-dir 2>/dev/null || true)"
+        if [[ -n "$common_dir" ]]; then
+            if [[ "$common_dir" != /* ]]; then
+                common_dir="$current_dir/$common_dir"
+            fi
+
+            common_dir="$(cd "$common_dir" 2>/dev/null && pwd || true)"
+            if [[ -n "$common_dir" ]]; then
+                local candidate
+                candidate="$(dirname "$common_dir")"
+                if [[ "$(basename "$common_dir")" == ".git" ]]; then
+                    candidate="$(dirname "$common_dir")"
+                fi
+                if git -C "$candidate" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
+                    echo "$candidate"
+                    return 0
+                fi
+            fi
+        fi
+
+        current_dir="$(dirname "$current_dir")"
+    done
+
+    print_error "No git repository found in parent directories"
+    print_status "Current working directory: $(pwd)"
+    print_status "Please run this command from within a git repository"
+    return 1
+}
+
+if [[ $# -gt 1 ]]; then
+    usage
+fi
+
+TARGET_BRANCH="${1:-}"
+
+SCRIPT_DIR="$(resolve_script_dir)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CORE_SCRIPT="$PROJECT_ROOT/lib/update-worktree"
+
+if [[ ! -x "$CORE_SCRIPT" ]]; then
+    print_error "Core script not found or not executable: $CORE_SCRIPT"
+    exit 1
+fi
+
+if [[ "$TARGET_BRANCH" == "-h" ]] || [[ "$TARGET_BRANCH" == "--help" ]]; then
+    exec "$CORE_SCRIPT" "$TARGET_BRANCH"
+fi
+
+print_status "Searching for git repository..."
+REPO_ROOT="$(find_git_repo)" || exit 1
+INVOCATION_DIR="$(pwd)"
+
+print_status "Found repository at: $REPO_ROOT"
+print_status "Running update-worktree..."
+cd "$REPO_ROOT"
+export REPO_ROOT
+export INVOCATION_DIR
+
+if [[ -n "$TARGET_BRANCH" ]]; then
+    exec "$CORE_SCRIPT" "$TARGET_BRANCH"
+fi
+
+exec "$CORE_SCRIPT"
+
