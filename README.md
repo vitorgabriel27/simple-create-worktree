@@ -1,6 +1,6 @@
 # Git Worktree Helper Scripts
 
-Small Bash toolkit to create, remove, and update Git worktrees with a consistent folder layout.
+Small Bash toolkit to create, remove, update, and merge Git worktrees with a consistent folder layout.
 
 ## Repository structure
 
@@ -9,11 +9,13 @@ Small Bash toolkit to create, remove, and update Git worktrees with a consistent
 ├── bin/
 │   ├── git-create-worktree
 │   ├── git-remove-worktree
-│   └── git-update-worktree
+│   ├── git-update-worktree
+│   └── git-merge-worktree
 ├── lib/
 │   ├── create-worktree
 │   ├── remove-worktree
-│   └── update-worktree
+│   ├── update-worktree
+│   └── merge-worktree
 ├── docs/
 │   ├── QUICK_START.txt
 │   ├── HOW_TO_USE.txt
@@ -24,6 +26,8 @@ Small Bash toolkit to create, remove, and update Git worktrees with a consistent
 ├── git-remove-worktree
 ├── update-worktree
 ├── git-update-worktree
+├── merge-worktree
+├── git-merge-worktree
 └── install.sh
 ```
 
@@ -44,6 +48,7 @@ This creates symlinks in `~/.local/bin`:
 - `git-create-worktree`
 - `git-remove-worktree`
 - `git-update-worktree`
+- `git-merge-worktree`
 
 If `~/.local/bin` is not in your `PATH`, add:
 
@@ -59,6 +64,8 @@ git-create-worktree -b feat/new-feature develop
 git-remove-worktree feat/my-feature
 git-update-worktree
 git-update-worktree develop
+git-merge-worktree feat/chart feat/dashboard
+git-merge-worktree -l feat/chart feat/dashboard
 ```
 
 ## Tests

@@ -5,6 +5,7 @@ Recommended commands:
 - git-create-worktree
 - git-remove-worktree
 - git-update-worktree
+- git-merge-worktree
 
 Install once:
 - ./install.sh
@@ -15,6 +16,8 @@ Examples:
 - git-remove-worktree feat/login-page
 - git-update-worktree
 - git-update-worktree develop
+- git-merge-worktree feat/chart feat/dashboard
+- git-merge-worktree -l feat/chart feat/dashboard
 
 Project files:
 - bin/: wrapper commands

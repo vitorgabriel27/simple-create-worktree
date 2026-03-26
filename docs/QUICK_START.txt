@@ -21,3 +21,9 @@ WORKTREE SCRIPTS - QUICK START
 
 7) Update a specific local branch:
    git-update-worktree develop
+
+8) Merge remote branch into local branch (in active worktree):
+   git-merge-worktree feat/chart feat/dashboard
+
+9) Merge local branch into local branch (in active worktree):
+   git-merge-worktree -l feat/chart feat/dashboard
