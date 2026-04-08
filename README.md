@@ -1,6 +1,6 @@
 # Git Worktree Helper Scripts
 
-Small Bash toolkit to create, remove, update, and merge Git worktrees with a consistent folder layout.
+Small Bash toolkit to create, update, merge, remove, and synchronize Git worktrees with a consistent folder layout.
 
 ## Repository structure
 
@@ -8,26 +8,28 @@ Small Bash toolkit to create, remove, update, and merge Git worktrees with a con
 .
 ├── bin/
 │   ├── git-create-worktree
-│   ├── git-remove-worktree
 │   ├── git-update-worktree
-│   └── git-merge-worktree
+│   ├── git-merge-worktree
+│   ├── git-remove-worktree
+│   └── git-worktree-sync
 ├── lib/
 │   ├── create-worktree
-│   ├── remove-worktree
 │   ├── update-worktree
-│   └── merge-worktree
+│   ├── merge-worktree
+│   ├── remove-worktree
+│   ├── git-worktree-sync
+│   └── git-worktree-common
 ├── docs/
 │   ├── QUICK_START.txt
 │   ├── HOW_TO_USE.txt
 │   └── WORKTREE_SCRIPTS_README.md
 ├── create-worktree
+├── git-update-worktree
+├── git-merge-worktree
 ├── remove-worktree
 ├── git-create-worktree
 ├── git-remove-worktree
-├── update-worktree
-├── git-update-worktree
-├── merge-worktree
-├── git-merge-worktree
+├── git-worktree-sync
 └── install.sh
 ```
 
@@ -49,6 +51,7 @@ This creates symlinks in `~/.local/bin`:
 - `git-remove-worktree`
 - `git-update-worktree`
 - `git-merge-worktree`
+- `git-worktree-sync`
 
 If `~/.local/bin` is not in your `PATH`, add:
 
@@ -61,11 +64,11 @@ export PATH="$HOME/.local/bin:$PATH"
 ```bash
 git-create-worktree feat/my-feature
 git-create-worktree -b feat/new-feature develop
+git-update-worktree feat/my-feature
+git-update-worktree feat/my-feature --to refs/tags/v1.2.3
+git-merge-worktree refs/remotes/origin/develop feat/my-feature
 git-remove-worktree feat/my-feature
-git-update-worktree
-git-update-worktree develop
-git-merge-worktree feat/chart feat/dashboard
-git-merge-worktree -l feat/chart feat/dashboard
+git-worktree-sync
 ```
 
 ## Tests
@@ -79,4 +82,6 @@ Run the main use-case test suite:
 ## Notes
 
 - Wrapper commands auto-detect your Git repository context.
-- Core commands (`./create-worktree`, `./remove-worktree`, `./update-worktree`) are intended to run from a valid Git repository directory.
+- Core commands (`./create-worktree`, `./remove-worktree`, `./update-worktree`, `./merge-worktree`) are intended to run from a valid Git repository directory.
+- `git-update-worktree` and `git-merge-worktree` manage Git version state only.
+- `git-worktree-sync` standardizes shared env files, backend virtualenvs, and pnpm store usage for reservoir-analytics-style repositories.

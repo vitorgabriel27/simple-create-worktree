@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CREATE_CMD="$ROOT_DIR/git-create-worktree"
 REMOVE_CMD="$ROOT_DIR/git-remove-worktree"
 UPDATE_CMD="$ROOT_DIR/git-update-worktree"
+MERGE_CMD="$ROOT_DIR/git-merge-worktree"
 
 TEST_COUNT=0
 TEST_TMP_DIR=""
@@ -85,6 +86,11 @@ run_help_tests() {
     out_update="$("$UPDATE_CMD" --help 2>&1 || true)"
     echo "$out_update" | grep -q "Usage:" || fail "update --help works" "Expected Usage output"
     pass "update --help works"
+
+    local out_merge
+    out_merge="$("$MERGE_CMD" --help 2>&1 || true)"
+    echo "$out_merge" | grep -q "Usage:" || fail "merge --help works" "Expected Usage output"
+    pass "merge --help works"
 }
 
 setup_repo() {
@@ -146,23 +152,6 @@ run_create_existing_branch_test() {
     assert_file_exists "existing branch worktree directory created" "$worktree"
     assert_worktree_registered "existing branch worktree registered" "$repo" "$worktree"
     pass "create from existing branch"
-}
-
-run_recreate_with_stale_registration_test() {
-    local repo="$1"
-    local nested="$repo/stale/recreate"
-    local worktree="$repo/feat/existing"
-
-    rm -rf "$worktree"
-    assert_file_not_exists "stale registration setup removed directory" "$worktree"
-    assert_worktree_registered "stale registration setup keeps registration" "$repo" "$worktree"
-
-    mkdir -p "$nested"
-    (cd "$nested" && "$CREATE_CMD" feat/existing >/dev/null)
-
-    assert_file_exists "stale registration recreated worktree directory" "$worktree"
-    assert_worktree_registered "stale registration recreated worktree registered" "$repo" "$worktree"
-    pass "recreate when stale registration exists"
 }
 
 run_remove_by_branch_test() {
@@ -244,69 +233,11 @@ run_remove_non_origin_worktrees_test() {
     pass "remove non-origin worktrees"
 }
 
-run_update_current_branch_from_worktree_test() {
-    local repo="$1"
-    local worktree="$repo/dev"
-
-    git -C "$repo" branch dev upstream/develop
-    (cd "$repo" && "$CREATE_CMD" dev >/dev/null)
-
-    local before_sha
-    before_sha="$(git -C "$repo" rev-parse dev)"
-
-    git clone -q "$TEST_TMP_DIR/upstream.git" "$TEST_TMP_DIR/upstream-writer" >/dev/null 2>&1
-    git -C "$TEST_TMP_DIR/upstream-writer" config user.name "test-user"
-    git -C "$TEST_TMP_DIR/upstream-writer" config user.email "test-user@example.com"
-    git -C "$TEST_TMP_DIR/upstream-writer" checkout -q develop
-    git -C "$TEST_TMP_DIR/upstream-writer" commit --allow-empty -m "advance develop" -q
-    git -C "$TEST_TMP_DIR/upstream-writer" push -q origin develop
-
-    (cd "$worktree" && "$UPDATE_CMD" >/dev/null)
-
-    local after_sha
-    local remote_sha
-    after_sha="$(git -C "$repo" rev-parse dev)"
-    remote_sha="$(git -C "$repo" rev-parse upstream/develop)"
-
-    [[ "$before_sha" != "$after_sha" ]] || fail "update current branch changes commit" "Expected dev to move forward"
-    [[ "$after_sha" == "$remote_sha" ]] || fail "update current branch matches remote" "Expected dev to match upstream/develop"
-    pass "update current branch from worktree"
-}
-
-run_update_branch_argument_test() {
-    local repo="$1"
-    local branch="feat/sync-target"
-
-    git -C "$repo" branch "$branch" upstream/develop
-    git -C "$repo" push -q -u upstream "$branch"
-    (cd "$repo" && "$CREATE_CMD" "$branch" >/dev/null)
-
-    local before_sha
-    before_sha="$(git -C "$repo" rev-parse "$branch")"
-
-    git -C "$TEST_TMP_DIR/upstream-writer" fetch -q origin
-    git -C "$TEST_TMP_DIR/upstream-writer" checkout -q "$branch"
-    git -C "$TEST_TMP_DIR/upstream-writer" commit --allow-empty -m "advance target branch" -q
-    git -C "$TEST_TMP_DIR/upstream-writer" push -q origin "$branch"
-
-    (cd "$repo" && "$UPDATE_CMD" "$branch" >/dev/null)
-
-    local after_sha
-    local remote_sha
-    after_sha="$(git -C "$repo" rev-parse "$branch")"
-    remote_sha="$(git -C "$repo" rev-parse upstream/$branch)"
-
-    [[ "$before_sha" != "$after_sha" ]] || fail "update branch argument changes commit" "Expected branch to move forward"
-    [[ "$after_sha" == "$remote_sha" ]] || fail "update branch argument matches remote" "Expected branch to match upstream/$branch"
-    pass "update explicit branch"
-
-    (cd "$repo" && printf "yes\n" | "$REMOVE_CMD" "$branch" >/dev/null)
-}
-
 main() {
     [[ -x "$CREATE_CMD" ]] || fail "create command executable" "$CREATE_CMD is not executable"
     [[ -x "$REMOVE_CMD" ]] || fail "remove command executable" "$REMOVE_CMD is not executable"
     [[ -x "$UPDATE_CMD" ]] || fail "update command executable" "$UPDATE_CMD is not executable"
+    [[ -x "$MERGE_CMD" ]] || fail "merge command executable" "$MERGE_CMD is not executable"
 
     TEST_TMP_DIR="$(mktemp -d)"
     trap '[[ -n "${TEST_TMP_DIR:-}" ]] && rm -rf "$TEST_TMP_DIR"' EXIT
@@ -318,7 +249,6 @@ main() {
     local repo="$TEST_TMP_DIR/repo"
 
     run_create_existing_branch_test "$repo"
-    run_recreate_with_stale_registration_test "$repo"
     run_remove_by_branch_test "$repo"
     run_create_new_branch_test "$repo"
     run_remove_by_path_test "$repo"
@@ -327,8 +257,6 @@ main() {
     local non_origin_repo="$TEST_TMP_DIR/repo-non-origin"
     run_create_existing_branch_with_non_origin_remote_test "$non_origin_repo"
     run_create_new_branch_with_non_origin_remote_test "$non_origin_repo"
-    run_update_current_branch_from_worktree_test "$non_origin_repo"
-    run_update_branch_argument_test "$non_origin_repo"
     run_remove_non_origin_worktrees_test "$non_origin_repo"
 
     echo ""

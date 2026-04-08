@@ -1,176 +1,66 @@
 #!/bin/bash
 
-# Git Worktree Update Script
-# Fetches from remote and fast-forwards a target branch safely
-
 set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-if [[ -z "${REPO_ROOT:-}" ]]; then
-    REPO_ROOT="$(pwd)"
-fi
-
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-worktree-common
+source "$SCRIPT_DIR/git-worktree-common"
 
 usage() {
     cat << EOF
-Usage: git-update-worktree [branch-name]
+Usage: git-update-worktree [branch-name-or-path] [--to <ref>]
 
-Update the current branch (default) or a specific local branch by fast-forwarding
-from the default remote after fetching.
+Move a worktree or branch to a specific Git version safely.
 
-Arguments:
-  [branch-name]      Optional local branch name to update explicitly
+Defaults:
+  - no argument: update the current worktree branch from its upstream/default remote branch
+  - branch-name: update that branch or its active worktree
+  - worktree-path: update that worktree
+
+Options:
+  --to <ref>          Target ref to move to. Supports local branch, remote branch,
+                      tag, or commit SHA.
 
 Examples:
   git-update-worktree
-  git-update-worktree develop
   git-update-worktree feat/my-feature
+  git-update-worktree /path/to/worktree
+  git-update-worktree feat/my-feature --to refs/tags/v1.2.3
+  git-update-worktree /path/to/worktree --to a1b2c3d4
 
 EOF
     exit 1
 }
 
-detect_default_remote() {
-    local current_branch
-    local branch_remote
-    local first_remote
+ARG_TARGET=""
+TO_REF=""
 
-    current_branch="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
-    if [[ -n "$current_branch" ]]; then
-        branch_remote="$(git -C "$REPO_ROOT" config --get "branch.$current_branch.remote" 2>/dev/null || true)"
-        if [[ -n "$branch_remote" ]]; then
-            echo "$branch_remote"
-            return 0
-        fi
-    fi
-
-    if git -C "$REPO_ROOT" remote | grep -qx "origin"; then
-        echo "origin"
-        return 0
-    fi
-
-    first_remote="$(git -C "$REPO_ROOT" remote | head -1)"
-    if [[ -n "$first_remote" ]]; then
-        echo "$first_remote"
-        return 0
-    fi
-
-    return 1
-}
-
-find_worktree_path_for_branch() {
-    local branch_name="$1"
-
-    git -C "$REPO_ROOT" worktree list --porcelain | awk -v b="$branch_name" '
-        $1 == "worktree" { wt = substr($0, 10) }
-        $1 == "branch" {
-            ref = substr($0, 8)
-            if (ref == "refs/heads/" b) {
-                print wt
-                exit
-            }
-        }
-    '
-}
-
-update_branch_fast_forward() {
-    local branch_name="$1"
-    local branch_upstream
-    local remote_branch
-    local active_worktree
-    local local_sha
-    local remote_sha
-
-    if ! git -C "$REPO_ROOT" rev-parse --verify "$branch_name" > /dev/null 2>&1; then
-        print_error "Local branch '$branch_name' does not exist"
-        exit 1
-    fi
-
-    branch_upstream="$(git -C "$REPO_ROOT" for-each-ref --format='%(upstream:short)' "refs/heads/$branch_name" | head -1)"
-    if [[ -n "$branch_upstream" ]]; then
-        remote_branch="$branch_upstream"
-    else
-        remote_branch="$DEFAULT_REMOTE/$branch_name"
-    fi
-
-    if ! git -C "$REPO_ROOT" rev-parse --verify "$remote_branch" > /dev/null 2>&1; then
-        print_error "Remote branch '$remote_branch' does not exist"
-        exit 1
-    fi
-
-    active_worktree="$(find_worktree_path_for_branch "$branch_name" || true)"
-    if [[ -n "$active_worktree" ]] && [[ -d "$active_worktree" ]]; then
-        print_status "Updating '$branch_name' in worktree: $active_worktree"
-        if git -C "$active_worktree" merge --ff-only "$remote_branch"; then
-            print_success "Branch '$branch_name' updated successfully"
-            return 0
-        fi
-
-        print_error "Failed to fast-forward '$branch_name' in worktree '$active_worktree'"
-        exit 1
-    fi
-
-    if [[ -n "$active_worktree" ]] && [[ ! -d "$active_worktree" ]]; then
-        print_warning "Found stale worktree registration for '$branch_name' at '$active_worktree'"
-        print_status "Pruning stale worktree registrations..."
-        git -C "$REPO_ROOT" worktree prune --expire now
-    fi
-
-    local_sha="$(git -C "$REPO_ROOT" rev-parse "$branch_name")"
-    remote_sha="$(git -C "$REPO_ROOT" rev-parse "$remote_branch")"
-
-    if [[ "$local_sha" == "$remote_sha" ]]; then
-        print_success "Branch '$branch_name' is already up to date"
-        return 0
-    fi
-
-    if git -C "$REPO_ROOT" merge-base --is-ancestor "$local_sha" "$remote_sha"; then
-        git -C "$REPO_ROOT" update-ref "refs/heads/$branch_name" "$remote_sha" "$local_sha"
-        print_success "Fast-forwarded '$branch_name' to '$remote_branch'"
-        return 0
-    fi
-
-    print_error "Cannot fast-forward '$branch_name' to '$remote_branch' (branches diverged)"
-    print_status "Switch to that branch and reconcile manually (merge or rebase)."
-    exit 1
-}
-
-if [[ $# -gt 1 ]]; then
-    print_error "Too many arguments"
-    usage
-fi
-
-TARGET_BRANCH="${1:-}"
-
-if [[ "$TARGET_BRANCH" == "-h" ]] || [[ "$TARGET_BRANCH" == "--help" ]]; then
-    usage
-fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --to)
+            if [[ $# -lt 2 ]]; then
+                print_error "Option --to requires a ref"
+                usage
+            fi
+            TO_REF="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            if [[ -n "$ARG_TARGET" ]]; then
+                print_error "Unexpected argument: $1"
+                usage
+            fi
+            ARG_TARGET="$1"
+            shift
+            ;;
+    esac
+done
 
 print_status "Validating repository..."
-if ! git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
-    print_error "Not a valid git repository at $REPO_ROOT"
-    exit 1
-fi
+validate_repository
 
 DEFAULT_REMOTE="$(detect_default_remote || true)"
 if [[ -z "$DEFAULT_REMOTE" ]]; then
@@ -186,23 +76,120 @@ fi
 
 print_status "Remote $DEFAULT_REMOTE: $REMOTE_URL"
 print_status "Fetching latest from remote $DEFAULT_REMOTE..."
-if git -C "$REPO_ROOT" fetch "$DEFAULT_REMOTE" 2>&1 | tail -1; then
+if fetch_remote_branches "$DEFAULT_REMOTE" 2>&1 | tail -1; then
     print_success "Fetch completed"
 else
     print_error "Failed to fetch from remote '$DEFAULT_REMOTE'"
     exit 1
 fi
 
-if [[ -z "$TARGET_BRANCH" ]]; then
-    INV_DIR="${INVOCATION_DIR:-$REPO_ROOT}"
-    TARGET_BRANCH="$(git -C "$INV_DIR" symbolic-ref --short HEAD 2>/dev/null || true)"
+FETCH_PERFORMED=true
+INV_DIR="${INVOCATION_DIR:-$REPO_ROOT}"
+DEST_WORKTREE=""
+DEST_BRANCH=""
+CURRENT_BRANCH=""
 
-    if [[ -z "$TARGET_BRANCH" ]]; then
-        print_warning "Detached HEAD detected - fetch completed, no branch updated"
-        print_status "Pass a branch name explicitly: git-update-worktree <branch>"
-        exit 0
+if [[ -z "$ARG_TARGET" ]]; then
+    DEST_WORKTREE="$(current_worktree_or_empty "$INV_DIR")"
+    if [[ -z "$DEST_WORKTREE" ]]; then
+        print_error "No current worktree detected. Pass a branch name or worktree path explicitly."
+        exit 1
+    fi
+elif [[ -d "$ARG_TARGET" ]]; then
+    DEST_WORKTREE="$(normalize_existing_path "$ARG_TARGET")"
+    if ! is_registered_worktree "$DEST_WORKTREE"; then
+        print_error "Path is not a registered worktree: $DEST_WORKTREE"
+        exit 1
+    fi
+else
+    DEST_BRANCH="$ARG_TARGET"
+    DEST_WORKTREE="$(find_worktree_path_for_branch "$DEST_BRANCH" || true)"
+fi
+
+if [[ -n "$DEST_WORKTREE" ]]; then
+    if [[ ! -d "$DEST_WORKTREE" ]]; then
+        print_warning "Worktree path is registered but missing on disk: $DEST_WORKTREE"
+        print_status "Pruning stale worktree registrations..."
+        git -C "$REPO_ROOT" worktree prune --expire now
+        if [[ ! -d "$DEST_WORKTREE" ]]; then
+            print_error "Destination worktree no longer exists: $DEST_WORKTREE"
+            exit 1
+        fi
+    fi
+
+    if ! is_registered_worktree "$DEST_WORKTREE"; then
+        print_error "Path is not a registered worktree: $DEST_WORKTREE"
+        exit 1
+    fi
+
+    CURRENT_BRANCH="$(git -C "$DEST_WORKTREE" symbolic-ref --short HEAD 2>/dev/null || true)"
+    if [[ -z "$DEST_BRANCH" ]]; then
+        DEST_BRANCH="$(branch_for_worktree_path "$DEST_WORKTREE" || true)"
+    fi
+else
+    if ! git -C "$REPO_ROOT" rev-parse --verify "$DEST_BRANCH" > /dev/null 2>&1; then
+        print_error "Local branch '$DEST_BRANCH' does not exist"
+        exit 1
     fi
 fi
 
-print_status "Target branch: $TARGET_BRANCH"
-update_branch_fast_forward "$TARGET_BRANCH"
+if [[ -z "$TO_REF" ]]; then
+    if [[ -n "$DEST_BRANCH" ]]; then
+        UPSTREAM_REF="$(git -C "$REPO_ROOT" for-each-ref --format='%(upstream:short)' "refs/heads/$DEST_BRANCH" | head -1)"
+        if [[ -n "$UPSTREAM_REF" ]]; then
+            TO_REF="$UPSTREAM_REF"
+        else
+            TO_REF="refs/remotes/$DEFAULT_REMOTE/$DEST_BRANCH"
+        fi
+    else
+        print_error "Detached worktrees require --to <ref>"
+        exit 1
+    fi
+fi
+
+IFS='|' read -r TARGET_KIND TARGET_REF TARGET_COMMIT <<< "$(resolve_ref_kind "$TO_REF" "$DEFAULT_REMOTE")"
+
+print_status "Destination worktree: ${DEST_WORKTREE:-<no active worktree>}"
+print_status "Current branch: ${CURRENT_BRANCH:-${DEST_BRANCH:-detached}}"
+print_status "Resolved target ref: $TARGET_REF"
+print_status "Resolved target commit: $TARGET_COMMIT"
+print_status "Fetch performed: $FETCH_PERFORMED"
+
+if [[ "$TARGET_KIND" == "tag" || "$TARGET_KIND" == "commit" ]]; then
+    if [[ -z "$DEST_WORKTREE" ]]; then
+        print_error "Tag and commit targets require an active destination worktree"
+        exit 1
+    fi
+
+    print_status "Checking out detached HEAD at $TARGET_COMMIT in $DEST_WORKTREE"
+    git -C "$DEST_WORKTREE" checkout --detach "$TARGET_COMMIT"
+    print_success "Worktree is now detached at $TARGET_COMMIT"
+    exit 0
+fi
+
+if [[ -z "$DEST_BRANCH" ]]; then
+    print_error "Cannot move a detached worktree branch target without an active local branch"
+    exit 1
+fi
+
+LOCAL_SHA="$(git -C "$REPO_ROOT" rev-parse "$DEST_BRANCH")"
+if [[ "$LOCAL_SHA" == "$TARGET_COMMIT" ]]; then
+    print_success "Branch '$DEST_BRANCH' is already at the requested version"
+    exit 0
+fi
+
+if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$LOCAL_SHA" "$TARGET_COMMIT"; then
+    print_error "Cannot fast-forward '$DEST_BRANCH' to '$TARGET_REF' (history would be rewritten)"
+    print_status "Use a future explicit reset/force workflow if you want non-fast-forward movement."
+    exit 1
+fi
+
+if [[ -n "$DEST_WORKTREE" ]] && [[ -d "$DEST_WORKTREE" ]]; then
+    print_status "Fast-forwarding branch '$DEST_BRANCH' in worktree: $DEST_WORKTREE"
+    git -C "$DEST_WORKTREE" merge --ff-only "$TARGET_REF"
+else
+    print_status "Fast-forwarding local branch '$DEST_BRANCH' without an active worktree"
+    git -C "$REPO_ROOT" update-ref "refs/heads/$DEST_BRANCH" "$TARGET_COMMIT" "$LOCAL_SHA"
+fi
+
+print_success "Branch '$DEST_BRANCH' updated to '$TARGET_REF'"

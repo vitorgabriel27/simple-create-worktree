@@ -1,10 +1,10 @@
 # Git Worktree Scripts
 
-Utility scripts to create, remove, update, and merge Git worktrees from a valid Git repository.
+Utility scripts to create, update, merge, and remove Git worktrees from a valid Git repository.
 
 ## Layout
 
-- `bin/`: public commands (`git-create-worktree`, `git-remove-worktree`, `git-update-worktree`, `git-merge-worktree`)
+- `bin/`: public commands (`git-create-worktree`, `git-update-worktree`, `git-merge-worktree`, `git-remove-worktree`, `git-worktree-sync`)
 - `lib/`: core implementation scripts
 - `docs/`: usage guides
 
@@ -27,11 +27,11 @@ export PATH="$HOME/.local/bin:$PATH"
 ```bash
 git-create-worktree feat/my-feature
 git-create-worktree -b feat/new-feature develop
+git-update-worktree feat/my-feature
+git-update-worktree feat/my-feature --to refs/tags/v1.2.3
+git-merge-worktree refs/remotes/origin/develop feat/my-feature
 git-remove-worktree feat/my-feature
-git-update-worktree
-git-update-worktree develop
-git-merge-worktree feat/chart feat/dashboard
-git-merge-worktree -l feat/chart feat/dashboard
+git-worktree-sync
 ```
 
 ## Advanced usage
@@ -40,7 +40,8 @@ Run core scripts from your repository directory:
 
 ```bash
 /path/to/this-repo/lib/create-worktree feat/my-feature
+/path/to/this-repo/lib/update-worktree feat/my-feature
+/path/to/this-repo/lib/merge-worktree refs/remotes/origin/develop feat/my-feature
 /path/to/this-repo/lib/remove-worktree feat/my-feature
-/path/to/this-repo/lib/update-worktree develop
-/path/to/this-repo/lib/merge-worktree feat/chart feat/dashboard
+/path/to/this-repo/lib/git-worktree-sync /path/to/worktree
 ```
