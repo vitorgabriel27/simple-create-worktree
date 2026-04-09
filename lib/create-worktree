@@ -36,6 +36,28 @@ print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+resolve_sync_command() {
+    if command -v git-worktree-sync > /dev/null 2>&1; then
+        command -v git-worktree-sync
+        return 0
+    fi
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -x "$script_dir/git-worktree-sync" ]]; then
+        printf '%s\n' "$script_dir/git-worktree-sync"
+        return 0
+    fi
+
+    return 1
+}
+
+is_registered_worktree() {
+    local path="$1"
+
+    git -C "$REPO_ROOT" worktree list --porcelain | grep -Fxq "worktree $path"
+}
+
 # Detect the default remote to use for fetch/ref resolution.
 # Preference:
 #   1. branch.<current>.remote
@@ -90,6 +112,16 @@ resolve_branch_ref() {
     return 1
 }
 
+# Fetch remote branch refs explicitly into refs/remotes/<remote>/*
+# This works even in bare repos where remote.<name>.fetch is unset.
+fetch_remote_branches() {
+    local remote_name="$1"
+
+    git -C "$REPO_ROOT" fetch "$remote_name" \
+        "+refs/heads/*:refs/remotes/$remote_name/*" \
+        --prune
+}
+
 # Function to display usage
 usage() {
     cat << EOF
@@ -107,6 +139,8 @@ Options:
                      Create a new local branch from base-branch and create worktree
                      <new-branch>   Name of the new branch to create
                      <base-branch>  Existing branch to base it on
+  --spec-kit         Bootstrap GitHub Spec Kit for Codex in the new worktree
+  --no-spec-kit      Skip Spec Kit bootstrap even if enabled by environment
 
 Examples:
   git-create-worktree feat/new-feature
@@ -114,6 +148,7 @@ Examples:
   git-create-worktree develop
   git-create-worktree -b feat/my-new-feature develop
   git-create-worktree -b feat/my-new-feature feat/smp-web
+  git-create-worktree --spec-kit feat/my-feature
 
 EOF
     exit 1
@@ -124,6 +159,7 @@ CREATE_NEW_BRANCH=false
 NEW_BRANCH_NAME=""
 BASE_BRANCH_NAME=""
 BRANCH_NAME=""
+BOOTSTRAP_SPEC_KIT="${GIT_CREATE_WORKTREE_BOOTSTRAP_SPEC_KIT:-false}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -138,6 +174,14 @@ while [[ $# -gt 0 ]]; do
             BRANCH_NAME="$NEW_BRANCH_NAME"
             shift 3
             ;;
+        --spec-kit)
+            BOOTSTRAP_SPEC_KIT=true
+            shift
+            ;;
+        --no-spec-kit)
+            BOOTSTRAP_SPEC_KIT=false
+            shift
+            ;;
         -h|--help)
             usage
             ;;
@@ -151,6 +195,34 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+bootstrap_spec_kit() {
+    local target_dir="$1"
+
+    if [[ "$BOOTSTRAP_SPEC_KIT" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ -d "$target_dir/.specify" ]]; then
+        print_status "Spec Kit already present at '$target_dir/.specify'"
+        return 0
+    fi
+
+    if ! command -v specify > /dev/null 2>&1; then
+        print_warning "Spec Kit bootstrap requested, but 'specify' is not available in PATH"
+        return 0
+    fi
+
+    print_status "Bootstrapping Spec Kit for Codex..."
+    if (
+        cd "$target_dir" && \
+        specify init --here --ai codex --force --no-git --ignore-agent-tools
+    ); then
+        print_success "Spec Kit initialized"
+    else
+        print_warning "Spec Kit initialization failed. Run 'specify init --here --ai codex --force --no-git' inside '$target_dir' to retry."
+    fi
+}
 
 # Validate inputs
 if [[ -z "$BRANCH_NAME" ]]; then
@@ -182,7 +254,7 @@ print_status "Remote $DEFAULT_REMOTE: $REMOTE_URL"
 
 # Fetch latest from remote
 print_status "Fetching latest from remote $DEFAULT_REMOTE..."
-if git -C "$REPO_ROOT" fetch "$DEFAULT_REMOTE" 2>&1 | tail -1; then
+if fetch_remote_branches "$DEFAULT_REMOTE" 2>&1 | tail -1; then
     print_success "Fetch completed"
 else
     print_error "Failed to fetch from remote '$DEFAULT_REMOTE'"
@@ -259,18 +331,12 @@ fi
 
 print_status "Worktree target: $TARGET_DIR"
 
-# Check if target is already registered as a worktree path
-TARGET_REGISTERED=false
-if git -C "$REPO_ROOT" worktree list --porcelain | grep -Fxq "worktree $TARGET_DIR"; then
-    TARGET_REGISTERED=true
-fi
-
 # Check if worktree already exists
 if [[ -d "$TARGET_DIR" ]]; then
     print_warning "Worktree already exists at $TARGET_DIR"
 
     # Check if it's a valid worktree
-    if [[ "$TARGET_REGISTERED" == true ]]; then
+    if is_registered_worktree "$TARGET_DIR"; then
         read -p "Do you want to remove and recreate it? (y/n) " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -282,21 +348,18 @@ if [[ -d "$TARGET_DIR" ]]; then
             exit 0
         fi
     else
-        print_error "Directory exists but is not a valid worktree: $TARGET_DIR"
-        exit 1
+        print_warning "Directory exists but is not a registered worktree: $TARGET_DIR"
+        read -p "Do you want to remove the orphan directory and recreate it? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_status "Removing orphan directory..."
+            rm -rf "$TARGET_DIR"
+            print_success "Orphan directory removed"
+        else
+            print_status "Skipping worktree creation"
+            exit 0
+        fi
     fi
-elif [[ "$TARGET_REGISTERED" == true ]]; then
-    print_warning "Found stale worktree registration for missing path: $TARGET_DIR"
-    print_status "Pruning stale worktree registrations..."
-    git -C "$REPO_ROOT" worktree prune --expire now
-
-    if git -C "$REPO_ROOT" worktree list --porcelain | grep -Fxq "worktree $TARGET_DIR"; then
-        print_error "Failed to clear stale worktree registration: $TARGET_DIR"
-        print_status "Try manually: git -C '$REPO_ROOT' worktree remove '$TARGET_DIR' --force"
-        exit 1
-    fi
-
-    print_success "Stale worktree registration cleared"
 fi
 
 # Create parent directory if needed
@@ -336,6 +399,27 @@ fi
 
 print_status "Location: $TARGET_DIR"
 print_status "Branch: $BRANCH_NAME"
+
+bootstrap_spec_kit "$TARGET_DIR"
+
+should_auto_sync() {
+    [[ -f "$REPO_ROOT/.worktree-sync.sh" ]] || \
+    { [[ -f "$TARGET_DIR/backend/pyproject.toml" ]] && [[ -d "$TARGET_DIR/frontend" ]]; }
+}
+
+if should_auto_sync; then
+    SYNC_CMD="$(resolve_sync_command || true)"
+    if [[ -n "${SYNC_CMD:-}" ]]; then
+        print_status "Bootstrapping shared runtime with git-worktree-sync..."
+        if "$SYNC_CMD" "$TARGET_DIR"; then
+            print_success "Shared runtime synchronized"
+        else
+            print_warning "git-worktree-sync reported an issue. Run it manually in '$TARGET_DIR' after fixing prerequisites."
+        fi
+    else
+        print_warning "git-worktree-sync not found in PATH. Skipping shared runtime bootstrap."
+    fi
+fi
 
 # If this was a newly created branch, show push instructions
 if [[ "$CREATE_NEW_BRANCH" == true ]]; then

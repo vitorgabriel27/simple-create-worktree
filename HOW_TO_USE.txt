@@ -1,15 +1,14 @@
 HOW TO USE
 ==========
 
+Canonical docs live under `docs/`.
+
 Recommended commands:
 - git-create-worktree
 - git-update-worktree
 - git-merge-worktree
 - git-remove-worktree
 - git-worktree-sync
-
-Install once:
-- ./install.sh
 
 Examples:
 - git-create-worktree feat/login-page
@@ -18,8 +17,9 @@ Examples:
 - git-update-worktree feat/login-page --to refs/tags/v1.2.3
 - git-merge-worktree refs/remotes/origin/develop feat/login-page
 - git-remove-worktree feat/login-page
+- git-worktree-sync /path/to/worktree
 
-Project files:
-- bin/: wrapper commands
-- lib/: core scripts
-- docs/: documentation
+See also:
+- docs/HOW_TO_USE.txt
+- docs/QUICK_START.txt
+- docs/WORKTREE_SCRIPTS_README.md

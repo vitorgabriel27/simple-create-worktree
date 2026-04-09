@@ -49,21 +49,7 @@ find_git_repo() {
     local current_dir="$(pwd)"
 
     while [[ "$current_dir" != "/" ]]; do
-        # Candidate 1: current directory is a git repository root.
-        local toplevel
-        toplevel="$(git -C "$current_dir" rev-parse --show-toplevel 2>/dev/null || true)"
-        if [[ -n "$toplevel" ]]; then
-            echo "$toplevel"
-            return 0
-        fi
-
-        # Candidate 2: current directory is a bare repository.
-        if git -C "$current_dir" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
-            echo "$current_dir"
-            return 0
-        fi
-
-        # Candidate 3: we're inside a worktree attached to a bare repository.
+        # Candidate 1: we're inside a worktree attached to a bare repository.
         local common_dir
         common_dir="$(git -C "$current_dir" rev-parse --git-common-dir 2>/dev/null || true)"
         if [[ -n "$common_dir" ]]; then
@@ -73,9 +59,15 @@ find_git_repo() {
 
             common_dir="$(cd "$common_dir" 2>/dev/null && pwd || true)"
             if [[ -n "$common_dir" ]]; then
+                if git -C "$common_dir" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
+                    echo "$common_dir"
+                    return 0
+                fi
+
                 local candidate
-                candidate="$(dirname "$common_dir")"
                 if [[ "$(basename "$common_dir")" == ".git" ]]; then
+                    candidate="$(dirname "$common_dir")"
+                else
                     candidate="$(dirname "$common_dir")"
                 fi
                 if git -C "$candidate" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
@@ -83,6 +75,20 @@ find_git_repo() {
                     return 0
                 fi
             fi
+        fi
+
+        # Candidate 2: current directory is a git repository root.
+        local toplevel
+        toplevel="$(git -C "$current_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+        if [[ -n "$toplevel" ]]; then
+            echo "$toplevel"
+            return 0
+        fi
+
+        # Candidate 3: current directory is a bare repository.
+        if git -C "$current_dir" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
+            echo "$current_dir"
+            return 0
         fi
 
         current_dir="$(dirname "$current_dir")"

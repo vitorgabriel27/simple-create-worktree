@@ -1,259 +1,121 @@
 #!/bin/bash
 
-# Git Worktree Merge Script
-# Merges a source branch into a destination branch that must be in an active worktree
-# Supports both local and remote source branches
-
 set -euo pipefail
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-worktree-common
+source "$SCRIPT_DIR/git-worktree-common"
 
-# Get the repository root.
-# Use REPO_ROOT from wrapper when available; otherwise use current directory.
-if [[ -z "${REPO_ROOT:-}" ]]; then
-    REPO_ROOT="$(pwd)"
-fi
-
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-# Detect the default remote to use for fetch/ref resolution.
-# Preference:
-#   1. branch.<current>.remote
-#   2. origin
-#   3. first configured remote
-detect_default_remote() {
-    local current_branch
-    local branch_remote
-    local first_remote
-
-    current_branch="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
-    if [[ -n "$current_branch" ]]; then
-        branch_remote="$(git -C "$REPO_ROOT" config --get "branch.$current_branch.remote" 2>/dev/null || true)"
-        if [[ -n "$branch_remote" ]]; then
-            echo "$branch_remote"
-            return 0
-        fi
-    fi
-
-    if git -C "$REPO_ROOT" remote | grep -qx "origin"; then
-        echo "origin"
-        return 0
-    fi
-
-    first_remote="$(git -C "$REPO_ROOT" remote | head -1)"
-    if [[ -n "$first_remote" ]]; then
-        echo "$first_remote"
-        return 0
-    fi
-
-    return 1
-}
-
-# Find the worktree path for a given branch
-find_worktree_path_for_branch() {
-    local branch_name="$1"
-
-    git -C "$REPO_ROOT" worktree list --porcelain | awk -v b="$branch_name" '
-        $1 == "worktree" { wt = substr($0, 10) }
-        $1 == "branch" {
-            ref = substr($0, 8)
-            if (ref == "refs/heads/" b) {
-                print wt
-                exit
-            }
-        }
-    '
-}
-
-# Function to display usage
 usage() {
     cat << EOF
-Usage: git-merge-worktree [-l] <source-branch> <destination-branch>
+Usage: git-merge-worktree <source-ref> <destination-branch>
 
-Merge a source branch into a destination branch.
-The destination branch must be checked out in an active worktree.
+Merge a source ref into the active worktree of a destination branch.
 
-Arguments:
-  <source-branch>       Branch to merge from
-  <destination-branch>  Branch to merge into (must be in active worktree)
-
-Options:
-  -l                    Use local source branch instead of remote
-                        Without -l: fetches and merges from remote/<source-branch>
-                        With -l: merges from local <source-branch>
+Source refs may be:
+  - local branch
+  - remote branch
+  - tag
+  - commit SHA
 
 Examples:
-  # Merge remote origin/feat/chart into local feat/dashboard
   git-merge-worktree feat/chart feat/dashboard
-
-  # Merge local feat/chart into local feat/dashboard
-  git-merge-worktree -l feat/chart feat/dashboard
-
-  # Merge remote origin/develop into local feat/my-feature
-  git-merge-worktree develop feat/my-feature
+  git-merge-worktree refs/remotes/origin/develop feat/my-feature
+  git-merge-worktree refs/tags/v1.2.3 feat/my-feature
 
 EOF
     exit 1
 }
 
-# Parse arguments
-USE_LOCAL=false
-SOURCE_BRANCH=""
-DEST_BRANCH=""
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -l)
-            USE_LOCAL=true
-            shift
-            ;;
-        -h|--help)
-            usage
-            ;;
-        *)
-            if [[ -z "$SOURCE_BRANCH" ]]; then
-                SOURCE_BRANCH="$1"
-            elif [[ -z "$DEST_BRANCH" ]]; then
-                DEST_BRANCH="$1"
-            else
-                print_error "Unexpected argument: $1"
-                usage
-            fi
-            shift
-            ;;
-    esac
-done
-
-# Validate inputs
-if [[ -z "$SOURCE_BRANCH" ]] || [[ -z "$DEST_BRANCH" ]]; then
-    print_error "Missing required arguments"
+if [[ $# -ne 2 ]]; then
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        usage
+    fi
+    print_error "Incorrect number of arguments"
     usage
 fi
 
-# Validate we're in a git repository
-print_status "Validating repository..."
-if ! git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
-    print_error "Not a valid git repository at $REPO_ROOT"
-    exit 1
-fi
+SOURCE_INPUT="$1"
+DEST_BRANCH="$2"
 
-# Detect default remote
+print_status "Validating repository..."
+validate_repository
+
 DEFAULT_REMOTE="$(detect_default_remote || true)"
 if [[ -z "$DEFAULT_REMOTE" ]]; then
     print_error "No git remote configured in the repository"
     exit 1
 fi
 
-# Get the remote URL
-REMOTE_URL=$(git -C "$REPO_ROOT" config --get "remote.$DEFAULT_REMOTE.url" 2>/dev/null || true)
+REMOTE_URL="$(git -C "$REPO_ROOT" config --get "remote.$DEFAULT_REMOTE.url" 2>/dev/null || true)"
 if [[ -z "$REMOTE_URL" ]]; then
     print_error "Remote '$DEFAULT_REMOTE' has no URL configured"
     exit 1
 fi
+
 print_status "Remote $DEFAULT_REMOTE: $REMOTE_URL"
-
-# Determine source reference
-if [[ "$USE_LOCAL" == true ]]; then
-    print_status "Using local branch '$SOURCE_BRANCH' as source..."
-    SOURCE_REF="$SOURCE_BRANCH"
-
-    # Validate local branch exists
-    if ! git -C "$REPO_ROOT" rev-parse --verify "$SOURCE_REF" > /dev/null 2>&1; then
-        print_error "Local branch '$SOURCE_BRANCH' does not exist"
-        print_status "Available local branches:"
-        git -C "$REPO_ROOT" branch | sed 's/^/  /'
-        exit 1
-    fi
-    print_success "Source branch '$SOURCE_REF' found"
+print_status "Fetching latest from remote $DEFAULT_REMOTE..."
+if fetch_remote_branches "$DEFAULT_REMOTE" 2>&1 | tail -1; then
+    print_success "Fetch completed"
 else
-    print_status "Using remote branch '$DEFAULT_REMOTE/$SOURCE_BRANCH' as source..."
-
-    # Fetch latest from remote
-    print_status "Fetching latest from remote $DEFAULT_REMOTE..."
-    if git -C "$REPO_ROOT" fetch "$DEFAULT_REMOTE" 2>&1 | tail -1; then
-        print_success "Fetch completed"
-    else
-        print_error "Failed to fetch from remote '$DEFAULT_REMOTE'"
-        exit 1
-    fi
-
-    SOURCE_REF="$DEFAULT_REMOTE/$SOURCE_BRANCH"
-
-    # Validate remote branch exists
-    if ! git -C "$REPO_ROOT" rev-parse --verify "$SOURCE_REF" > /dev/null 2>&1; then
-        print_error "Remote branch '$SOURCE_REF' does not exist"
-        print_status "Available remote branches:"
-        git -C "$REPO_ROOT" branch -r | grep "^  $DEFAULT_REMOTE/" | sed 's/^/  /'
-        exit 1
-    fi
-    print_success "Source branch '$SOURCE_REF' found"
-fi
-
-# Validate destination branch exists locally
-print_status "Validating destination branch '$DEST_BRANCH'..."
-if ! git -C "$REPO_ROOT" rev-parse --verify "$DEST_BRANCH" > /dev/null 2>&1; then
-    print_error "Destination branch '$DEST_BRANCH' does not exist locally"
-    print_status "Available local branches:"
-    git -C "$REPO_ROOT" branch | sed 's/^/  /'
+    print_error "Failed to fetch from remote '$DEFAULT_REMOTE'"
     exit 1
 fi
-print_success "Destination branch '$DEST_BRANCH' exists"
 
-# Find the worktree for the destination branch
-print_status "Searching for worktree with branch '$DEST_BRANCH'..."
+IFS='|' read -r SOURCE_KIND SOURCE_REF SOURCE_COMMIT <<< "$(resolve_ref_kind "$SOURCE_INPUT" "$DEFAULT_REMOTE")"
+
+if ! git -C "$REPO_ROOT" rev-parse --verify "$DEST_BRANCH" > /dev/null 2>&1; then
+    print_error "Destination branch '$DEST_BRANCH' does not exist locally"
+    exit 1
+fi
+
 DEST_WORKTREE="$(find_worktree_path_for_branch "$DEST_BRANCH" || true)"
-
 if [[ -z "$DEST_WORKTREE" ]]; then
+    DEST_WORKTREE="$(default_worktree_path_for_branch "$DEST_BRANCH")"
+    if [[ -d "$DEST_WORKTREE" ]] && is_registered_worktree "$DEST_WORKTREE"; then
+        CURRENT_BRANCH="$(git -C "$DEST_WORKTREE" symbolic-ref --short HEAD 2>/dev/null || true)"
+        if [[ -z "$CURRENT_BRANCH" ]]; then
+            print_error "Destination worktree is detached: $DEST_WORKTREE"
+            exit 1
+        fi
+    fi
+
     print_error "Branch '$DEST_BRANCH' is not checked out in any worktree"
-    print_status "The destination branch must be in an active worktree to receive the merge"
-    print_status "Available worktrees:"
-    git -C "$REPO_ROOT" worktree list | sed 's/^/  /'
-    print_status ""
-    print_status "Hint: Create a worktree for '$DEST_BRANCH' first:"
-    echo "  git-create-worktree $DEST_BRANCH"
     exit 1
 fi
 
 if [[ ! -d "$DEST_WORKTREE" ]]; then
-    print_error "Worktree directory '$DEST_WORKTREE' does not exist"
+    print_warning "Destination worktree is registered but missing on disk: $DEST_WORKTREE"
     print_status "Pruning stale worktree registrations..."
     git -C "$REPO_ROOT" worktree prune --expire now
+    if [[ ! -d "$DEST_WORKTREE" ]]; then
+        print_error "Destination worktree no longer exists: $DEST_WORKTREE"
+        exit 1
+    fi
+fi
+
+CURRENT_BRANCH="$(git -C "$DEST_WORKTREE" symbolic-ref --short HEAD 2>/dev/null || true)"
+if [[ -z "$CURRENT_BRANCH" ]]; then
+    print_error "Destination worktree is detached: $DEST_WORKTREE"
     exit 1
 fi
 
-print_success "Found worktree at: $DEST_WORKTREE"
+if [[ "$CURRENT_BRANCH" != "$DEST_BRANCH" ]]; then
+    print_error "Destination worktree is not on branch '$DEST_BRANCH'"
+    print_status "Current branch: $CURRENT_BRANCH"
+    exit 1
+fi
 
-# Perform the merge
-print_status "Merging '$SOURCE_REF' into '$DEST_BRANCH'..."
-echo ""
+print_status "Destination worktree: $DEST_WORKTREE"
+print_status "Destination branch: $DEST_BRANCH"
+print_status "Resolved source ref: $SOURCE_REF"
+print_status "Resolved source commit: $SOURCE_COMMIT"
+print_status "Fetch performed: true"
 
 if git -C "$DEST_WORKTREE" merge "$SOURCE_REF" -m "Merge $SOURCE_REF into $DEST_BRANCH"; then
-    echo ""
-    print_success "Merge completed successfully!"
-    print_status "Branch '$DEST_BRANCH' now includes changes from '$SOURCE_REF'"
+    print_success "Merge completed successfully"
     print_status "Worktree location: $DEST_WORKTREE"
 else
-    echo ""
     print_error "Merge failed or has conflicts"
     print_status "Resolve conflicts in worktree: $DEST_WORKTREE"
     print_status "Then run: git -C '$DEST_WORKTREE' commit"

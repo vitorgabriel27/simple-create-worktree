@@ -13,14 +13,17 @@ WORKTREE SCRIPTS - QUICK START
 4) Create new branch + worktree:
    git-create-worktree -b feat/new-feature develop
 
-5) Remove worktree:
-   git-remove-worktree feat/my-feature
-
-6) Fast-forward a worktree branch safely:
+5) Update a worktree branch safely:
    git-update-worktree feat/my-feature
 
-7) Move a worktree to a tag or commit in detached HEAD:
+6) Move a worktree to a tag or commit:
    git-update-worktree feat/my-feature --to refs/tags/v1.2.3
 
-8) Merge a source ref into a destination worktree branch:
+7) Merge a source ref into a destination worktree branch:
    git-merge-worktree refs/remotes/origin/develop feat/my-feature
+
+8) Remove worktree:
+   git-remove-worktree feat/my-feature
+
+9) Sync shared runtime assets:
+   git-worktree-sync /path/to/worktree
