@@ -47,6 +47,18 @@ find_git_repo() {
 
             common_dir="$(cd "$common_dir" 2>/dev/null && pwd || true)"
             if [[ -n "$common_dir" ]]; then
+                # If common_dir points to a .git directory, prefer its parent.
+                # This avoids returning "<repo>/.git" as REPO_ROOT in layouts where
+                # worktrees live under "<repo>/".
+                if [[ "$(basename "$common_dir")" == ".git" ]]; then
+                    local parent_repo
+                    parent_repo="$(dirname "$common_dir")"
+                    if git -C "$parent_repo" rev-parse --git-dir > /dev/null 2>&1; then
+                        echo "$parent_repo"
+                        return 0
+                    fi
+                fi
+
                 if git -C "$common_dir" rev-parse --is-bare-repository 2>/dev/null | grep -q "true"; then
                     echo "$common_dir"
                     return 0
