@@ -125,8 +125,22 @@ if ! is_registered_worktree "$WORKTREE_PATH"; then
         fi
 
         print_status "Removing orphan directory..."
-        rm -rf "$WORKTREE_PATH"
-        print_success "Orphan directory removed"
+        if ! rm -rf "$WORKTREE_PATH" 2>/dev/null; then
+            if find "$WORKTREE_PATH" -not -user "$USER" -print -quit 2>/dev/null | grep -q .; then
+                print_warning "Found root-owned files, trying sudo rm -rf..."
+                if sudo -S rm -rf "$WORKTREE_PATH" 2>/dev/null; then
+                    print_success "Orphan directory removed (via sudo)"
+                else
+                    print_error "Failed to remove orphan directory even with sudo"
+                    exit 1
+                fi
+            else
+                print_error "Failed to remove orphan directory"
+                exit 1
+            fi
+        else
+            print_success "Orphan directory removed"
+        fi
 
         print_status "Checking for local branch '$BRANCH_NAME'..."
         if git -C "$REPO_ROOT" rev-parse --verify "$BRANCH_NAME" > /dev/null 2>&1; then
@@ -196,11 +210,22 @@ fi
 
 # Remove the worktree
 print_status "Removing worktree..."
-if git -C "$REPO_ROOT" worktree remove "$WORKTREE_PATH" --force; then
-    print_success "Worktree removed"
+if ! git -C "$REPO_ROOT" worktree remove "$WORKTREE_PATH" --force 2>/dev/null; then
+    if find "$WORKTREE_PATH" -not -user "$USER" -print -quit 2>/dev/null | grep -q .; then
+        print_warning "Found root-owned files, trying sudo rm -rf..."
+        if sudo -S rm -rf "$WORKTREE_PATH" 2>/dev/null; then
+            git -C "$REPO_ROOT" worktree prune
+            print_success "Worktree removed (via sudo)"
+        else
+            print_error "Failed to remove worktree even with sudo"
+            exit 1
+        fi
+    else
+        print_error "Failed to remove worktree"
+        exit 1
+    fi
 else
-    print_error "Failed to remove worktree"
-    exit 1
+    print_success "Worktree removed"
 fi
 
 # Try to remove the local branch
