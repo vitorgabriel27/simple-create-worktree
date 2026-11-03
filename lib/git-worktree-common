@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+# Git for Windows prints paths as C:/..., while Git Bash prints /c/... or /tmp/...;
+# make pwd use git's form so path comparisons and joins line up.
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    pwd() { builtin pwd -W; }
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

@@ -2,6 +2,19 @@
 
 set -euo pipefail
 
+# Git for Windows prints paths as C:/..., while Git Bash prints /c/... or /tmp/...;
+# make pwd use git's form so path comparisons and joins line up.
+VENV_BIN_DIR="bin"
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    pwd() { builtin pwd -W; }
+    # readlink reports MSYS paths too; convert so link targets compare equal.
+    readlink() { local target; target="$(command readlink "$@")" || return; cygpath -m "$target"; }
+    # Without this, ln -s in Git Bash silently copies instead of linking.
+    # Native symlinks need Windows Developer Mode.
+    export MSYS="winsymlinks:nativestrict${MSYS:+ $MSYS}"
+    VENV_BIN_DIR="Scripts"
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -85,7 +98,8 @@ get_git_common_dir() {
         return 1
     fi
 
-    if [[ "$common_dir" != /* ]]; then
+    # Absolute paths: "/..." on Linux, "C:/..." from Git for Windows.
+    if [[ "$common_dir" != /* && "$common_dir" != [A-Za-z]:/* ]]; then
         common_dir="$(cd "$dir/$common_dir" 2>/dev/null && pwd || true)"
     else
         common_dir="$(cd "$common_dir" 2>/dev/null && pwd || true)"
@@ -610,7 +624,7 @@ sync_poetry_project() {
 
     ensure_dir "$(dirname "$venv_dir")"
 
-    if [[ ! -x "$venv_dir/bin/python" ]]; then
+    if [[ ! -x "$venv_dir/$VENV_BIN_DIR/python" ]]; then
         print_status "Creating shared venv for $project_rel: $venv_dir"
         if ! "$python_bin" -m venv "$venv_dir"; then
             print_warning "Failed to create venv for $project_rel with $python_bin. Skipping."
@@ -638,7 +652,7 @@ sync_poetry_project() {
     (
         cd "$project_dir"
         export VIRTUAL_ENV="$venv_dir"
-        export PATH="$venv_dir/bin:$PATH"
+        export PATH="$venv_dir/$VENV_BIN_DIR:$PATH"
         export POETRY_VIRTUALENVS_CREATE=false
         setup_poetry_auth "$worktree_path" "$project_dir" "$project_rel"
         if ! poetry install --no-interaction; then

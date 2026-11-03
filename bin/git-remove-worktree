@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# Git for Windows prints paths as C:/..., while Git Bash prints /c/... or /tmp/...;
+# make pwd use git's form so path comparisons and joins line up.
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    pwd() { builtin pwd -W; }
+fi
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -47,12 +53,14 @@ resolve_script_dir() {
 find_git_repo() {
     local current_dir="$(pwd)"
 
-    while [[ "$current_dir" != "/" ]]; do
+    # Stop at the filesystem root: "/" on Linux, "C:" in Git Bash (dirname is a fixed point there).
+    while [[ "$current_dir" != "$(dirname "$current_dir")" ]]; do
         # Candidate 1: we're inside a worktree attached to a bare repository.
         local common_dir
         common_dir="$(git -C "$current_dir" rev-parse --git-common-dir 2>/dev/null || true)"
         if [[ -n "$common_dir" ]]; then
-            if [[ "$common_dir" != /* ]]; then
+            # Absolute paths: "/..." on Linux, "C:/..." from Git for Windows.
+            if [[ "$common_dir" != /* && "$common_dir" != [A-Za-z]:/* ]]; then
                 common_dir="$current_dir/$common_dir"
             fi
 
