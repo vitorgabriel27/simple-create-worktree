@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# In Git Bash, make ln -s create real symlinks (needs Windows Developer Mode).
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    export MSYS="winsymlinks:nativestrict${MSYS:+ $MSYS}"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="$HOME/.local/bin"
 

@@ -2,6 +2,13 @@
 
 set -euo pipefail
 
+# Git for Windows prints paths as C:/..., while Git Bash prints /c/... or /tmp/...;
+# make pwd use git's form so path comparisons and joins line up.
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    pwd() { builtin pwd -W; }
+    readlink() { local target; target="$(command readlink "$@")" || return; cygpath -m "$target"; }
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CREATE_CMD="$ROOT_DIR/git-create-worktree"
 SYNC_CMD="$ROOT_DIR/git-worktree-sync"
@@ -127,7 +134,7 @@ main() {
     [[ -x "$CREATE_CMD" ]] || fail "create command executable" "$CREATE_CMD is not executable"
     [[ -x "$SYNC_CMD" ]] || fail "sync command executable" "$SYNC_CMD is not executable"
 
-    TEST_TMP_DIR="$(mktemp -d)"
+    TEST_TMP_DIR="$(cd "$(mktemp -d)" && pwd)"
     trap '[[ -n "${TEST_TMP_DIR:-}" ]] && rm -rf "$TEST_TMP_DIR"' EXIT
 
     local bare_repo

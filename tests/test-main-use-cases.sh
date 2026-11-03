@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+# Git for Windows prints paths as C:/..., while Git Bash prints /c/... or /tmp/...;
+# make pwd use git's form so path comparisons and joins line up.
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    pwd() { builtin pwd -W; }
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CREATE_CMD="$ROOT_DIR/git-create-worktree"
 REMOVE_CMD="$ROOT_DIR/git-remove-worktree"
@@ -239,7 +245,7 @@ main() {
     [[ -x "$UPDATE_CMD" ]] || fail "update command executable" "$UPDATE_CMD is not executable"
     [[ -x "$MERGE_CMD" ]] || fail "merge command executable" "$MERGE_CMD is not executable"
 
-    TEST_TMP_DIR="$(mktemp -d)"
+    TEST_TMP_DIR="$(cd "$(mktemp -d)" && pwd)"
     trap '[[ -n "${TEST_TMP_DIR:-}" ]] && rm -rf "$TEST_TMP_DIR"' EXIT
 
     run_help_tests

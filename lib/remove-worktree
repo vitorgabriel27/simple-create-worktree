@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# Git for Windows prints paths as C:/..., while Git Bash prints /c/... or /tmp/...;
+# make pwd use git's form so path comparisons and joins line up.
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    pwd() { builtin pwd -W; }
+fi
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -126,7 +132,7 @@ if ! is_registered_worktree "$WORKTREE_PATH"; then
 
         print_status "Removing orphan directory..."
         if ! rm -rf "$WORKTREE_PATH" 2>/dev/null; then
-            if find "$WORKTREE_PATH" -not -user "$USER" -print -quit 2>/dev/null | grep -q .; then
+            if [[ "${OSTYPE:-}" != msys* ]] && find "$WORKTREE_PATH" -not -user "$USER" -print -quit 2>/dev/null | grep -q .; then
                 print_warning "Found root-owned files, trying sudo rm -rf..."
                 if sudo -S rm -rf "$WORKTREE_PATH" 2>/dev/null; then
                     print_success "Orphan directory removed (via sudo)"
@@ -211,7 +217,7 @@ fi
 # Remove the worktree
 print_status "Removing worktree..."
 if ! git -C "$REPO_ROOT" worktree remove "$WORKTREE_PATH" --force 2>/dev/null; then
-    if find "$WORKTREE_PATH" -not -user "$USER" -print -quit 2>/dev/null | grep -q .; then
+    if [[ "${OSTYPE:-}" != msys* ]] && find "$WORKTREE_PATH" -not -user "$USER" -print -quit 2>/dev/null | grep -q .; then
         print_warning "Found root-owned files, trying sudo rm -rf..."
         if sudo -S rm -rf "$WORKTREE_PATH" 2>/dev/null; then
             git -C "$REPO_ROOT" worktree prune

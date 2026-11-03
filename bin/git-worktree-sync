@@ -2,5 +2,11 @@
 
 set -euo pipefail
 
+# Git for Windows prints paths as C:/..., while Git Bash prints /c/... or /tmp/...;
+# make pwd use git's form so path comparisons and joins line up.
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    pwd() { builtin pwd -W; }
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec "$SCRIPT_DIR/../lib/git-worktree-sync" "$@"
